@@ -1,0 +1,14 @@
+colabfold[alphafold] @ git+https://github.com/sokrypton/ColabFold.git
+py3Dmol
+pandas
+matplotlib
+seaborn
+MDAnalysis
+biopython
+numpy
+scipy
+tqdm
+jupyterlab
+plotly
+dash
+biotite

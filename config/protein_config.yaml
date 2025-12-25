@@ -1,0 +1,66 @@
+# 蛋白质突变分析项目配置
+# 目标蛋白: p53 DNA结合域 (PDB: 1TUP)
+# 突变位点: R273H (精氨酸→组氨酸)
+
+protein:
+  name: "p53_DNA_binding_domain"
+  pdb_id: "1TUP"
+  chain: "A"
+  residues:
+    start: 94
+    end: 312
+  
+mutation:
+  position: 273
+  wild_type: "R"
+  mutant: "H"
+  description: "R273H - 常见癌症相关突变，影响DNA结合"
+
+colabfold:
+  model_type: "AlphaFold2-ptm"
+  num_recycles: 3
+  use_templates: false
+  use_msa: true
+  msa_mode: "MMseqs2 (UniRef+Environmental)"
+  
+md_simulation:
+  force_field: "amber99sb-ildn"
+  water_model: "tip3p"
+  box_type: "dodecahedron"
+  box_distance: 1.0  # nm
+  ion_concentration: 0.15  # M
+  
+  # 能量最小化
+  em_max_force: 1000  # kJ/mol/nm
+  em_nsteps: 50000
+  
+  # NVT平衡
+  nvt_time: 100  # ps
+  nvt_temperature: 310  # K
+  nvt_time_step: 0.002  # ps
+  
+  # NPT平衡
+  npt_time: 500  # ps
+  npt_temperature: 310  # K
+  npt_pressure: 1.0  # bar
+  npt_time_step: 0.002  # ps
+  
+  # 生产MD
+  production_time: 10  # ns
+  production_temperature: 310  # K
+  production_pressure: 1.0  # bar
+  production_time_step: 0.002  # ps
+  save_interval: 10  # ps
+
+analysis:
+  rmsd_selection: "backbone"
+  rg_selection: "protein"
+  hydrogen_bond_cutoff: 3.5  # Å
+  sasa_probe_radius: 1.4  # Å
+  
+output:
+  base_dir: "results"
+  structure_dir: "structures"
+  trajectory_dir: "trajectories"
+  analysis_dir: "analysis"
+  figures_dir: "figures"
