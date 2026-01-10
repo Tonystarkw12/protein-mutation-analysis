@@ -47,10 +47,16 @@ venv.bak/
 .venv
 
 # Data files
-results/
+# 但保留重要的图表和报告
+results/trajectories/
 *.fasta
 *.pdb
 *.pdb.gz
+*.trr
+*.xtc
+*.edr
+*.cpt
+*.gro
 
 # Logs
 *.log
