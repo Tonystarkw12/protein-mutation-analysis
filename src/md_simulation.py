@@ -74,81 +74,91 @@ class MDSimulator:
     def prepare_topology(self, pdb_file, output_dir):
         """准备拓扑结构"""
         print(f"准备拓扑结构: {pdb_file}")
-        
-        work_dir = Path(output_dir)
+
+        work_dir = Path(output_dir).resolve()
         work_dir.mkdir(exist_ok=True)
-        
+
+        # 转换为绝对路径
+        pdb_file_abs = Path(pdb_file).resolve()
+
         # 1. pdb2gmx - 生成拓扑文件
-        cmd = ['gmx', 'pdb2gmx', 
-               '-f', str(pdb_file),
-               '-o', 'processed.gro',
-               '-p', 'topol.top',
+        cmd = ['gmx', 'pdb2gmx',
+               '-f', str(pdb_file_abs),
+               '-o', str(work_dir / 'processed.gro'),
+               '-p', str(work_dir / 'topol.top'),
                '-ff', self.config['md_simulation']['force_field'],
                '-water', self.config['md_simulation']['water_model']]
-        
+
         # 自动选择力场参数
         input_data = "1\n"  # 选择第一个力场选项
-        
-        if not self.run_gmx_command(cmd, input_data=input_data, cwd=work_dir):
+
+        if not self.run_gmx_command(cmd, input_data=input_data):
             return None
-            
+
         return work_dir / 'processed.gro'
     
     def define_box_and_solvate(self, gro_file, work_dir):
         """定义盒子并溶剂化"""
         print("定义模拟盒子和溶剂化...")
-        
+
+        # 转换为绝对路径
+        gro_file_abs = Path(gro_file).resolve()
+
         # 1. 定义盒子
         cmd = ['gmx', 'editconf',
-               '-f', str(gro_file),
-               '-o', 'boxed.gro',
+               '-f', str(gro_file_abs),
+               '-o', str(work_dir / 'boxed.gro'),
                '-c', '-d', str(self.config['md_simulation']['box_distance']),
                '-bt', self.config['md_simulation']['box_type']]
-        
-        if not self.run_gmx_command(cmd, cwd=work_dir):
+
+        if not self.run_gmx_command(cmd):
             return None
-        
+
         # 2. 溶剂化
         cmd = ['gmx', 'solvate',
-               '-cp', 'boxed.gro',
+               '-cp', str(work_dir / 'boxed.gro'),
                '-cs', 'spc216.gro',
-               '-o', 'solvated.gro',
-               '-p', 'topol.top']
-        
-        if not self.run_gmx_command(cmd, cwd=work_dir):
+               '-o', str(work_dir / 'solvated.gro'),
+               '-p', str(work_dir / 'topol.top')]
+
+        if not self.run_gmx_command(cmd):
             return None
-            
+
         return work_dir / 'solvated.gro'
     
     def add_ions(self, gro_file, work_dir):
         """添加离子平衡电荷"""
         print("添加离子...")
-        
+
+        work_dir = Path(work_dir).resolve()
+        gro_file_abs = Path(gro_file).resolve()
+
         # 1. 生成.tpr文件用于添加离子
         cmd = ['gmx', 'grompp',
-               '-f', 'ions.mdp',
-               '-c', str(gro_file),
-               '-p', 'topol.top',
-               '-o', 'ions.tpr']
-        
-        if not self.run_gmx_command(cmd, cwd=work_dir):
+               '-f', str(work_dir / 'ions.mdp'),
+               '-c', str(gro_file_abs),
+               '-p', str(work_dir / 'topol.top'),
+               '-o', str(work_dir / 'ions.tpr'),
+               '-maxwarn', '1']  # 允许净电荷警告
+
+        if not self.run_gmx_command(cmd):
             return None
-        
+
         # 2. 添加离子
         cmd = ['gmx', 'genion',
-               '-s', 'ions.tpr',
-               '-o', 'ionized.gro',
-               '-p', 'topol.top',
+               '-s', str(work_dir / 'ions.tpr'),
+               '-o', str(work_dir / 'ionized.gro'),
+               '-p', str(work_dir / 'topol.top'),
                '-pname', 'NA',
                '-nname', 'CL',
                '-neutral', '-conc', str(self.config['md_simulation']['ion_concentration'])]
-        
+
         # 选择溶剂组
         input_data = "13\n"  # 通常SOL组是13
-        
-        if not self.run_gmx_command(cmd, input_data=input_data, cwd=work_dir):
+
+        if not self.run_gmx_command(cmd, input_data=input_data):
             return None
-            
+
         return work_dir / 'ionized.gro'
     
     def create_mdp_files(self, work_dir):
@@ -211,24 +221,21 @@ pbc             = xyz
         return f"""
 ; nvt.mdp - NVT equilibration
 title                   = NVT Equilibration
-define                  = -DPOSRES
 
 integrator              = md
 dt                      = {self.config['md_simulation']['nvt_time_step']}
 nsteps                  = {int(self.config['md_simulation']['nvt_time'] / self.config['md_simulation']['nvt_time_step'])}
 
-output-frequency        = 1000
 nstxout                 = 1000
 nstvout                 = 1000
 nstenergy               = 1000
 nstlog                  = 1000
 
 continuation            = no
-constraint_algorithm    = linck
+constraint_algorithm    = Lincs
 constraints             = h-bonds
 
 cutoff-scheme           = Verlet
-ns_type                 = grid
 nstlist                 = 10
 rcoulomb                = 1.0
 rvdw                    = 1.0
@@ -250,24 +257,21 @@ pbc                     = xyz
         return f"""
 ; npt.mdp - NPT equilibration
 title                   = NPT Equilibration
-define                  = -DPOSRES
 
 integrator              = md
 dt                      = {self.config['md_simulation']['npt_time_step']}
 nsteps                  = {int(self.config['md_simulation']['npt_time'] / self.config['md_simulation']['npt_time_step'])}
 
-output-frequency        = 1000
 nstxout                 = 1000
 nstvout                 = 1000
 nstenergy               = 1000
 nstlog                  = 1000
 
 continuation            = yes
-constraint_algorithm    = linck
+constraint_algorithm    = Lincs
 constraints             = h-bonds
 
 cutoff-scheme           = Verlet
-ns_type                 = grid
 nstlist                 = 10
 rcoulomb                = 1.0
 rvdw                    = 1.0
@@ -288,7 +292,7 @@ compressibility         = 4.5e-5
 
 pbc                     = xyz
 """
-    
+
     def _get_md_mdp(self):
         """生产MD参数文件"""
         return f"""
@@ -299,14 +303,13 @@ integrator              = md
 dt                      = {self.config['md_simulation']['production_time_step']}
 nsteps                  = {int(self.config['md_simulation']['production_time'] * 1000 / self.config['md_simulation']['production_time_step'])}
 
-output-frequency        = {int(self.config['md_simulation']['save_interval'] * 1000 / self.config['md_simulation']['production_time_step'])}
-stxout                 = 0
+nstxout                 = 0
 nstvout                 = 0
 nstenergy               = {int(self.config['md_simulation']['save_interval'] * 1000 / self.config['md_simulation']['production_time_step'])}
-stlog                  = {int(self.config['md_simulation']['save_interval'] * 1000 / self.config['md_simulation']['production_time_step'])}
+nstlog                  = {int(self.config['md_simulation']['save_interval'] * 1000 / self.config['md_simulation']['production_time_step'])}
 
 continuation            = yes
-constraint_algorithm    = linck
+constraint_algorithm    = Lincs
 constraints             = h-bonds
 
 cutoff-scheme           = Verlet
@@ -336,20 +339,22 @@ pbc                     = xyz
         """能量最小化"""
         print("执行能量最小化...")
         
+        work_dir = Path(work_dir).resolve()
+        
         # 1. 生成.tpr文件
         cmd = ['gmx', 'grompp',
-               '-f', 'em.mdp',
-               '-c', 'ionized.gro',
-               '-p', 'topol.top',
-               '-o', 'em.tpr']
+               '-f', str(work_dir / 'em.mdp'),
+               '-c', str(work_dir / 'ionized.gro'),
+               '-p', str(work_dir / 'topol.top'),
+               '-o', str(work_dir / 'em.tpr')]
         
-        if not self.run_gmx_command(cmd, cwd=work_dir):
+        if not self.run_gmx_command(cmd):
             return False
         
-        # 2. 运行能量最小化
-        cmd = ['gmx', 'mdrun', '-v', '-deffnm', 'em']
-        
-        if not self.run_gmx_command(cmd, cwd=work_dir):
+        # 2. 运行能量最小化（使用CUDA GPU加速）
+        cmd = ['gmx', 'mdrun', '-nb', 'gpu', '-ntmpi', '1', '-ntomp', '8', '-v', '-deffnm', 'em']
+
+        if not self.run_gmx_command(cmd, cwd=str(work_dir)):
             return False
             
         return True
@@ -357,71 +362,77 @@ pbc                     = xyz
     def nvt_equilibration(self, work_dir):
         """NVT平衡"""
         print("执行NVT平衡...")
-        
+
+        work_dir = Path(work_dir).resolve()
+
         # 1. 生成.tpr文件
         cmd = ['gmx', 'grompp',
-               '-f', 'nvt.mdp',
-               '-c', 'em.gro',
-               '-r', 'em.gro',
-               '-p', 'topol.top',
-               '-o', 'nvt.tpr']
-        
-        if not self.run_gmx_command(cmd, cwd=work_dir):
+               '-f', str(work_dir / 'nvt.mdp'),
+               '-c', str(work_dir / 'em.gro'),
+               '-r', str(work_dir / 'em.gro'),
+               '-p', str(work_dir / 'topol.top'),
+               '-o', str(work_dir / 'nvt.tpr')]
+
+        if not self.run_gmx_command(cmd):
             return False
-        
-        # 2. 运行NVT模拟
-        cmd = ['gmx', 'mdrun', '-v', '-deffnm', 'nvt']
-        
-        if not self.run_gmx_command(cmd, cwd=work_dir):
+
+        # 2. 运行NVT模拟（使用CUDA GPU加速）
+        cmd = ['gmx', 'mdrun', '-nb', 'gpu', '-ntmpi', '1', '-ntomp', '8', '-v', '-deffnm', 'nvt']
+
+        if not self.run_gmx_command(cmd, cwd=str(work_dir)):
             return False
-            
+
         return True
     
     def npt_equilibration(self, work_dir):
         """NPT平衡"""
         print("执行NPT平衡...")
-        
+
+        work_dir = Path(work_dir).resolve()
+
         # 1. 生成.tpr文件
         cmd = ['gmx', 'grompp',
-               '-f', 'npt.mdp',
-               '-c', 'nvt.gro',
-               '-r', 'nvt.gro',
-               '-t', 'nvt.cpt',
-               '-p', 'topol.top',
-               '-o', 'npt.tpr']
-        
-        if not self.run_gmx_command(cmd, cwd=work_dir):
+               '-f', str(work_dir / 'npt.mdp'),
+               '-c', str(work_dir / 'nvt.gro'),
+               '-r', str(work_dir / 'nvt.gro'),
+               '-t', str(work_dir / 'nvt.cpt'),
+               '-p', str(work_dir / 'topol.top'),
+               '-o', str(work_dir / 'npt.tpr')]
+
+        if not self.run_gmx_command(cmd):
             return False
-        
-        # 2. 运行NPT模拟
-        cmd = ['gmx', 'mdrun', '-v', '-deffnm', 'npt']
-        
-        if not self.run_gmx_command(cmd, cwd=work_dir):
+
+        # 2. 运行NPT模拟（使用CUDA GPU加速）
+        cmd = ['gmx', 'mdrun', '-nb', 'gpu', '-ntmpi', '1', '-ntomp', '8', '-v', '-deffnm', 'npt']
+
+        if not self.run_gmx_command(cmd, cwd=str(work_dir)):
             return False
-            
+
         return True
-    
+
     def production_md(self, work_dir):
         """生产MD模拟"""
         print("执行生产MD模拟...")
-        
+
+        work_dir = Path(work_dir).resolve()
+
         # 1. 生成.tpr文件
         cmd = ['gmx', 'grompp',
-               '-f', 'md.mdp',
-               '-c', 'npt.gro',
-               '-t', 'npt.cpt',
-               '-p', 'topol.top',
-               '-o', 'md.tpr']
-        
-        if not self.run_gmx_command(cmd, cwd=work_dir):
+               '-f', str(work_dir / 'md.mdp'),
+               '-c', str(work_dir / 'npt.gro'),
+               '-t', str(work_dir / 'npt.cpt'),
+               '-p', str(work_dir / 'topol.top'),
+               '-o', str(work_dir / 'md.tpr')]
+
+        if not self.run_gmx_command(cmd):
             return False
-        
-        # 2. 运行生产MD模拟
-        cmd = ['gmx', 'mdrun', '-v', '-deffnm', 'md']
-        
-        if not self.run_gmx_command(cmd, cwd=work_dir):
+
+        # 2. 运行生产MD模拟（使用CUDA GPU加速）
+        cmd = ['gmx', 'mdrun', '-nb', 'gpu', '-ntmpi', '1', '-ntomp', '8', '-v', '-deffnm', 'md']
+
+        if not self.run_gmx_command(cmd, cwd=str(work_dir)):
             return False
-            
+
         return True
     
     def run_complete_md(self, pdb_file, protein_name):

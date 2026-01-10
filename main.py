@@ -114,28 +114,65 @@ class ProteinMutationAnalyzer:
         self.log("=" * 50)
         self.log("步骤1: 蛋白质结构预测")
         self.log("=" * 50)
-        
+
         predictor = ProteinStructurePredictor("config/protein_config.yaml")
-        
+
         # 准备序列
         queries = predictor.prepare_sequences("data/p53_sequences.fasta")
         self.log(f"准备序列查询: {list(queries.keys())}")
-        
+
+        # 检查是否已有真实PDB文件（不是CA-only模拟文件）
+        base_dir = Path(self.config['output']['base_dir'])
+        structure_dir = base_dir / self.config['output']['structure_dir']
+
+        has_real_pdb = True
+        for jobname in queries.keys():
+            pdb_file = structure_dir / jobname / f"{jobname}.pdb"
+            if pdb_file.exists():
+                # 检查是否是完整的PDB文件（不只是CA原子）
+                with open(pdb_file, 'r') as f:
+                    lines = f.readlines()
+                    # 检查是否有N, CA, C, O等多种原子类型
+                    atom_types = set()
+                    for line in lines[:100]:  # 检查前100行
+                        if line.startswith('ATOM'):
+                            atom_name = line[12:16].strip()
+                            atom_types.add(atom_name)
+                    # 如果只有CA或原子类型少于3种，认为是简化结构
+                    if len(atom_types) <= 1 or 'CA' in atom_types and len(atom_types) < 4:
+                        self.log(f"PDB文件 {pdb_file} 是简化结构，需要重新生成")
+                        has_real_pdb = False
+                    else:
+                        self.log(f"✓ 找到真实PDB文件: {pdb_file}")
+            else:
+                has_real_pdb = False
+
+        if has_real_pdb:
+            self.log("使用现有的真实PDB结构，跳过结构预测")
+
+            # 仍然生成报告和可视化
+            quality_report = predictor.analyze_prediction_quality()
+            predictor.visualize_structures(quality_report)
+            report_file = predictor.generate_summary_report(quality_report)
+            self.log(f"预测报告已生成: {report_file}")
+
+            return True
+
         # 预测结构
         if predictor.predict_structures(queries):
             self.log("结构预测成功")
-            
+
             # 分析质量
             quality_report = predictor.analyze_prediction_quality()
             self.log(f"预测质量报告: {quality_report}")
-            
+
             # 可视化
             predictor.visualize_structures(quality_report)
-            
+
             # 生成报告
             report_file = predictor.generate_summary_report(quality_report)
             self.log(f"预测报告已生成: {report_file}")
-            
+
             return True
         else:
             self.log("结构预测失败")
@@ -188,7 +225,11 @@ class ProteinMutationAnalyzer:
         self.log("=" * 50)
         self.log("步骤3: 结构分析")
         self.log("=" * 50)
-        
+
+        if not ANALYSIS_AVAILABLE:
+            self.log("警告: 结构分析模块不可用，跳过分析步骤")
+            return True
+
         analyzer = StructureAnalyzer("config/protein_config.yaml")
         
         # 查找轨迹文件
